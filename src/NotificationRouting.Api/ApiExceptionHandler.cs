@@ -20,8 +20,13 @@ public sealed class ApiExceptionHandler : IExceptionHandler
         Exception exception,
         CancellationToken cancellationToken)
     {
+        if (exception is OperationCanceledException && httpContext.RequestAborted.IsCancellationRequested)
+            return false;
+
         (int status, string title) = exception switch
         {
+            BadHttpRequestException badRequest when badRequest.StatusCode == StatusCodes.Status413PayloadTooLarge
+                => (StatusCodes.Status413PayloadTooLarge, "Request body too large"),
             NotificationNotFoundException => (StatusCodes.Status404NotFound, "Resource not found"),
             IdempotencyConflictException => (StatusCodes.Status409Conflict, "Idempotency conflict"),
             DeliveryStateConflictException => (StatusCodes.Status409Conflict, "Delivery state conflict"),
@@ -37,6 +42,11 @@ public sealed class ApiExceptionHandler : IExceptionHandler
             _logger.LogInformation("Request rejected with status {StatusCode}: {Reason}", status, exception.Message);
 
         httpContext.Response.StatusCode = status;
+        string detail = status == StatusCodes.Status413PayloadTooLarge
+            ? RequestBodyLimitExtensions.PayloadTooLargeDetail
+            : status >= 500
+                ? "An unexpected error occurred."
+                : exception.Message;
         return await _problemDetailsService.TryWriteAsync(new ProblemDetailsContext
         {
             HttpContext = httpContext,
@@ -44,7 +54,7 @@ public sealed class ApiExceptionHandler : IExceptionHandler
             {
                 Status = status,
                 Title = title,
-                Detail = status >= 500 ? "An unexpected error occurred." : exception.Message,
+                Detail = detail,
                 Instance = httpContext.Request.Path,
             },
         }).ConfigureAwait(false);

@@ -8,7 +8,9 @@ using NotificationRouting.Application.Abstractions;
 using NotificationRouting.Domain;
 using NotificationRouting.Domain.Abstractions;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 
 namespace NotificationRouting.IntegrationTests;
@@ -16,6 +18,9 @@ namespace NotificationRouting.IntegrationTests;
 public sealed class NotificationApiTests
 {
     private static readonly string[] SecurityKeywords = ["security"];
+    private static readonly string[] DuplicateKeywords = ["security", " SECURITY "];
+    private static readonly string[] BlankKeywords = ["   "];
+    private static readonly string[] OversizedKeywords = [new string('x', 51)];
 
     [Fact]
     public async Task PublishReturnsAcceptedAndCompletesAsynchronously()
@@ -173,6 +178,78 @@ public sealed class NotificationApiTests
         Assert.Equal(HttpStatusCode.OK, health.StatusCode);
     }
 
+    [Fact]
+    public async Task OversizedRequestReturnsSafePayloadTooLargeProblem()
+    {
+        using var factory = new WebApplicationFactory<Program>();
+        using HttpClient client = factory.CreateClient();
+        string json = JsonSerializer.Serialize(new
+        {
+            name = new string('x', (128 * 1024) + 1),
+            alertKeywords = Array.Empty<string>(),
+        });
+        using var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+        using HttpResponseMessage response = await client.PostAsync("/api/users", content);
+
+        await AssertProblemAsync(
+            response,
+            HttpStatusCode.RequestEntityTooLarge,
+            "Request body too large",
+            "The request body must not exceed 128 KiB.");
+    }
+
+    [Theory]
+    [MemberData(nameof(InvalidAlertKeywordCases))]
+    public async Task UserCreationRejectsInvalidAlertKeywords(string[] alertKeywords)
+    {
+        using var factory = new WebApplicationFactory<Program>();
+        using HttpClient client = factory.CreateClient();
+
+        using HttpResponseMessage response = await client.PostAsJsonAsync(
+            "/api/users",
+            new { name = $"Operator-{Guid.NewGuid():N}", alertKeywords });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+    }
+
+    [Fact]
+    public async Task UnsupportedMediaTypeReturnsProblemDetails()
+    {
+        using var factory = new WebApplicationFactory<Program>();
+        using HttpClient client = factory.CreateClient();
+        using var content = new StringContent("{\"name\":\"Operator\"}", Encoding.UTF8);
+        content.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
+
+        using HttpResponseMessage response = await client.PostAsync("/api/users", content);
+
+        Assert.Equal(HttpStatusCode.UnsupportedMediaType, response.StatusCode);
+        Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+    }
+
+    [Fact]
+    public async Task SwaggerIsNotAvailableInProduction()
+    {
+        using var factory = new ProductionApiFactory();
+        using HttpClient client = factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            AllowAutoRedirect = false,
+        });
+
+        using HttpResponseMessage response = await client.GetAsync("/swagger/index.html");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    public static TheoryData<string[]> InvalidAlertKeywordCases => new()
+    {
+        Enumerable.Range(1, 11).Select(index => $"keyword-{index}").ToArray(),
+        DuplicateKeywords,
+        BlankKeywords,
+        OversizedKeywords,
+    };
+
     private static async Task<(Guid UserId, Guid TopicId)> CreateSubscriptionAsync(HttpClient client)
     {
         using HttpResponseMessage userResponse = await client.PostAsJsonAsync(
@@ -229,13 +306,16 @@ public sealed class NotificationApiTests
     private static async Task AssertProblemAsync(
         HttpResponseMessage response,
         HttpStatusCode expectedStatus,
-        string expectedTitle)
+        string expectedTitle,
+        string? expectedDetail = null)
     {
         Assert.Equal(expectedStatus, response.StatusCode);
         Assert.Equal("application/problem+json", response.Content.Headers.ContentType?.MediaType);
         JsonElement problem = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal((int)expectedStatus, problem.GetProperty("status").GetInt32());
         Assert.Equal(expectedTitle, problem.GetProperty("title").GetString());
+        if (expectedDetail is not null)
+            Assert.Equal(expectedDetail, problem.GetProperty("detail").GetString());
     }
 
     private sealed class WebhookApiFactory : WebApplicationFactory<Program>
@@ -258,6 +338,14 @@ public sealed class NotificationApiTests
                 services.RemoveAll<IDeliveryDelay>();
                 services.AddSingleton<IDeliveryDelay, ImmediateDelay>();
             });
+        }
+    }
+
+    private sealed class ProductionApiFactory : WebApplicationFactory<Program>
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            builder.UseEnvironment("Production");
         }
     }
 

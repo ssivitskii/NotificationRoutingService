@@ -13,11 +13,12 @@ An in-memory ASP.NET Core backend for asynchronously dispatching notifications t
 - Deduplicates concurrent publication requests through a required `Idempotency-Key`.
 - Sends webhook JSON through `IHttpClientFactory` with a stable delivery ID and an explicit host/scheme policy.
 - Returns validation errors and expected failures as RFC-compatible Problem Details.
-- Exposes Swagger UI and a health endpoint.
+- Includes a responsive Angular 22 operations console for setup, publication, live delivery tracking, inbox/archive inspection, read state, and dead-letter retries.
+- Limits request bodies to 128 KiB, caps and validates alert keywords, and exposes Swagger UI in Development plus a health endpoint in every environment.
 
 ## Tech Stack
 
-C# · .NET 9 · ASP.NET Core Web API · System.Threading.Channels · BackgroundService · IHttpClientFactory · built-in dependency injection · Swagger/OpenAPI · xUnit · WebApplicationFactory
+C# · .NET 9 · ASP.NET Core Web API · Angular 22 · TypeScript · RxJS · System.Threading.Channels · BackgroundService · IHttpClientFactory · built-in dependency injection · Swagger/OpenAPI · xUnit · Vitest · WebApplicationFactory
 
 ## Architecture
 
@@ -31,6 +32,7 @@ The archive/local subscriber pipeline and each webhook are independent targets. 
 - `src/NotificationRouting.Application` — use cases, delivery lifecycle, retry processing, and ports.
 - `src/NotificationRouting.Infrastructure` — bounded queue, hosted consumer, concurrent stores, webhook adapter, and logging.
 - `src/NotificationRouting.Api` — controllers, DTOs, Problem Details, Swagger, health.
+- `frontend` — Angular operations console with a same-origin development proxy.
 - `tests/NotificationRouting.UnitTests` — recipient, archive, formatter, and result behavior.
 - `tests/NotificationRouting.IntegrationTests` — HTTP workflow through `WebApplicationFactory`.
 
@@ -47,15 +49,42 @@ dotnet build NotificationRoutingService.slnx -c Release
 ## Run
 
 ```bash
-dotnet run --project src/NotificationRouting.Api --urls http://localhost:5082
+ASPNETCORE_ENVIRONMENT=Development dotnet run --project src/NotificationRouting.Api --urls http://localhost:5082
 ```
 
 Open Swagger at `http://localhost:5082/swagger` or check `GET http://localhost:5082/health`.
+
+Swagger is intentionally registered only when the API runs in the `Development` environment.
+
+## Run the operations console
+
+Keep the API running on `http://localhost:5082`, then open a second terminal:
+
+```bash
+cd frontend
+npm install
+npm start
+```
+
+Open `http://localhost:4200`. The Angular proxy keeps browser requests same-origin; the API does not enable CORS. Use **Connect pipeline** to create a user, topic, and subscription in order, then publish and follow the delivery to a terminal state. The record panels expose the inbox, archive, read state, and any retryable dead letters.
+
+If the subscription request reaches the server but its response is lost, the console cannot distinguish that success from a conflicting subscription because the intentionally small API has no subscription query endpoint. Reset the console to start a new uniquely named workspace in that rare case.
 
 ## Tests
 
 ```bash
 dotnet test NotificationRoutingService.slnx -c Release
+```
+
+Frontend checks:
+
+```bash
+cd frontend
+npm test
+npx tsc -p tsconfig.app.json --noEmit
+npx tsc -p tsconfig.spec.json --noEmit
+npm run format:check
+npm run build
 ```
 
 ## Examples
@@ -115,7 +144,7 @@ Webhook registration is disabled until hosts are explicitly configured. HTTPS is
 
 Create a user with an optional `webhookUrl` only after its host is allowlisted. Redirects are disabled. HTTP may be enabled explicitly for a controlled local endpoint, but should remain disabled for normal use.
 
-The included `NotificationRouting.Api.http` file contains starter requests for IDE HTTP clients.
+User creation accepts at most 10 case-insensitively unique alert keywords; each trimmed keyword must contain 1–50 characters. The included `NotificationRouting.Api.http` file contains starter requests for IDE HTTP clients.
 
 ## Design Decisions
 

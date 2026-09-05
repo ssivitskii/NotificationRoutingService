@@ -3,6 +3,7 @@ using NotificationRouting.Infrastructure;
 using System.Text.Json.Serialization;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
+builder.ConfigureRequestBodyLimit();
 builder.Services.AddControllers().AddJsonOptions(options =>
     options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddProblemDetails();
@@ -14,8 +15,13 @@ builder.Services.AddNotificationRouting(builder.Configuration);
 
 WebApplication app = builder.Build();
 app.UseExceptionHandler();
-app.UseSwagger();
-app.UseSwaggerUI();
+app.UseRequestBodyLimit();
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
+
 app.MapControllers();
 app.MapHealthChecks("/health");
 app.Run();

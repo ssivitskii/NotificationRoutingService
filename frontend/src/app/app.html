@@ -1,0 +1,392 @@
+<div class="shell">
+  <header class="masthead">
+    <a class="brand" href="#top" aria-label="Signal Desk home">
+      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span><strong>SIGNAL DESK</strong><small>notification operations</small></span>
+    </a>
+    <div class="system-status"><span></span> In-memory node · API 5082</div>
+    <button type="button" class="text-button" (click)="reset()">Reset workspace</button>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Operations console / 01</p>
+        <h1>Route every signal.<br /><em>See every outcome.</em></h1>
+        <p class="lede">
+          Configure a subscriber, publish an incident, and watch the asynchronous delivery pipeline
+          move from queue to terminal state.
+        </p>
+      </div>
+      <div class="hero-telemetry" aria-label="Workspace status">
+        <span>WORKSPACE</span>
+        <strong>{{ setupState() === 'ready' ? 'ONLINE' : 'STANDBY' }}</strong>
+        <small>{{ topicId() ? 'Topic linked' : 'Awaiting setup' }}</small>
+      </div>
+    </section>
+
+    <section class="workspace-grid">
+      <article class="panel setup-panel">
+        <div class="panel-heading">
+          <div>
+            <span class="number">01</span>
+            <h2>Connect workspace</h2>
+          </div>
+          <span class="state-label" [attr.data-state]="setupState()">{{ setupState() }}</span>
+        </div>
+
+        <form (ngSubmit)="runSetup()" novalidate>
+          <label>
+            <span>Operator name</span>
+            <input
+              name="userName"
+              [(ngModel)]="userName"
+              maxlength="100"
+              autocomplete="name"
+              [disabled]="!!userId()"
+            />
+          </label>
+          <label>
+            <span>Alert keywords <small>comma separated</small></span>
+            <input
+              name="alertKeywords"
+              [(ngModel)]="alertKeywords"
+              placeholder="security, outage"
+              [disabled]="!!userId()"
+            />
+          </label>
+          <div class="field-row">
+            <label>
+              <span>Topic</span>
+              <input
+                name="topicName"
+                [(ngModel)]="topicName"
+                maxlength="100"
+                [disabled]="!!topicId()"
+              />
+            </label>
+            <label>
+              <span>Minimum importance</span>
+              <select
+                name="minimumImportance"
+                [(ngModel)]="minimumImportance"
+                [disabled]="subscriptionStep() === 'done'"
+              >
+                @for (importance of importanceOptions; track importance) {
+                  <option [value]="importance">{{ importance }}</option>
+                }
+              </select>
+            </label>
+          </div>
+          @if (setupValidation() || setupError()) {
+            <p class="form-error" role="alert">{{ setupValidation() || setupError() }}</p>
+          }
+          <button
+            class="primary-button"
+            type="submit"
+            [disabled]="setupState() === 'loading' || setupState() === 'ready'"
+          >
+            {{
+              setupState() === 'loading'
+                ? 'Connecting…'
+                : setupState() === 'ready'
+                  ? 'Connected'
+                  : 'Connect pipeline'
+            }}
+          </button>
+        </form>
+
+        <ol class="step-list" aria-label="Workspace setup progress">
+          <li [attr.data-step]="userStep()">
+            <span>1</span>
+            <div>
+              <strong>Create user</strong><small>{{ userId() || 'Not started' }}</small>
+            </div>
+          </li>
+          <li [attr.data-step]="topicStep()">
+            <span>2</span>
+            <div>
+              <strong>Create topic</strong><small>{{ topicId() || 'Not started' }}</small>
+            </div>
+          </li>
+          <li [attr.data-step]="subscriptionStep()">
+            <span>3</span>
+            <div>
+              <strong>Attach subscription</strong
+              ><small>{{
+                subscriptionStep() === 'done' ? minimumImportance + ' and above' : 'Not started'
+              }}</small>
+            </div>
+          </li>
+        </ol>
+      </article>
+
+      <article class="panel composer-panel">
+        <div class="panel-heading">
+          <div>
+            <span class="number">02</span>
+            <h2>Publish signal</h2>
+          </div>
+          <span class="state-label" [attr.data-state]="trackingState()">{{ trackingState() }}</span>
+        </div>
+        <form (ngSubmit)="publish()" novalidate>
+          <label>
+            <span>Message title</span>
+            <input name="messageTitle" [(ngModel)]="messageTitle" maxlength="200" />
+          </label>
+          <label>
+            <span>Message body</span>
+            <textarea
+              name="messageBody"
+              [(ngModel)]="messageBody"
+              maxlength="4000"
+              rows="4"
+            ></textarea>
+          </label>
+          <div class="field-row">
+            <label>
+              <span>Importance</span>
+              <select name="messageImportance" [(ngModel)]="messageImportance">
+                @for (importance of importanceOptions; track importance) {
+                  <option [value]="importance">{{ importance }}</option>
+                }
+              </select>
+            </label>
+            <label>
+              <span>Idempotency key</span>
+              <input
+                name="idempotencyKey"
+                [(ngModel)]="idempotencyKey"
+                maxlength="128"
+                [disabled]="trackingState() === 'loading' || trackingState() === 'tracking'"
+              />
+            </label>
+          </div>
+          @if (publishValidation() || trackingError()) {
+            <p class="form-error" role="alert">{{ publishValidation() || trackingError() }}</p>
+          }
+          <button
+            class="primary-button coral"
+            type="submit"
+            [disabled]="
+              setupState() !== 'ready' ||
+              trackingState() === 'loading' ||
+              trackingState() === 'tracking'
+            "
+          >
+            {{ trackingState() === 'loading' ? 'Publishing…' : 'Publish notification' }}
+          </button>
+        </form>
+      </article>
+    </section>
+
+    <section class="delivery-section" aria-live="polite">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Live dispatch / 03</p>
+          <h2>Delivery telemetry</h2>
+        </div>
+        @if (delivery()) {
+          <span class="status-chip" [attr.data-tone]="statusTone(delivery()!.status)">{{
+            delivery()!.status
+          }}</span>
+        }
+      </div>
+
+      @if (trackingState() === 'idle') {
+        <div class="empty-state">
+          <span>⌁</span><strong>No active dispatch</strong>
+          <p>Connect the workspace and publish a signal to begin tracking.</p>
+        </div>
+      } @else if (trackingState() === 'loading' && !delivery()) {
+        <div class="empty-state pulse">
+          <span></span><strong>Submitting to queue</strong>
+          <p>The API is accepting your idempotent request.</p>
+        </div>
+      } @else if (delivery(); as current) {
+        <div class="dispatch-summary">
+          <div>
+            <small>MESSAGE</small><strong>{{ current.title }}</strong>
+          </div>
+          <div>
+            <small>IMPORTANCE</small><strong>{{ current.importance }}</strong>
+          </div>
+          <div>
+            <small>TARGETS</small><strong>{{ current.deliveries.length }}</strong>
+          </div>
+          <div>
+            <small>ACCEPTED</small><strong>{{ current.acceptedAt | date: 'HH:mm:ss' }}</strong>
+          </div>
+        </div>
+        @if (acceptedIdempotencyKey()) {
+          <p class="idempotency-note">
+            Key <code>{{ acceptedIdempotencyKey() }}</code>
+            @if (idempotencyReplayed()) {
+              <span>replayed safely</span>
+            }
+          </p>
+        }
+        <div class="route-line" aria-label="Dispatch progress">
+          @for (stage of ['Queued', 'Processing', 'Terminal']; track stage; let index = $index) {
+            <div
+              [class.reached]="index === 0 || current.status !== 'Queued'"
+              [class.final]="index === 2 && terminalStatuses.includes(current.status)"
+            >
+              <span></span><small>{{ stage }}</small>
+            </div>
+          }
+        </div>
+        <div class="target-grid">
+          @for (target of current.deliveries; track trackById($index, target)) {
+            <article class="target-card">
+              <div>
+                <span class="destination-icon" aria-hidden="true">{{
+                  target.destination.startsWith('inbox') ? 'IN' : 'WH'
+                }}</span>
+                <div>
+                  <small>DESTINATION</small>
+                  <h3>{{ target.destination }}</h3>
+                </div>
+              </div>
+              <span class="status-chip" [attr.data-tone]="statusTone(target.status)">{{
+                target.status
+              }}</span>
+              <dl>
+                <div>
+                  <dt>Attempts</dt>
+                  <dd>{{ target.attempts.length }}</dd>
+                </div>
+                <div>
+                  <dt>HTTP</dt>
+                  <dd>{{ target.lastHttpStatusCode || '—' }}</dd>
+                </div>
+              </dl>
+              @if (target.lastError) {
+                <p class="target-error">{{ target.lastError }}</p>
+              }
+              @if (target.attempts.length) {
+                <details>
+                  <summary>Attempt history</summary>
+                  <ul>
+                    @for (attempt of target.attempts; track attempt.number) {
+                      <li>
+                        #{{ attempt.number }} ·
+                        {{ attempt.succeeded ? 'Delivered' : attempt.error }}
+                      </li>
+                    }
+                  </ul>
+                </details>
+              }
+            </article>
+          } @empty {
+            <div class="inline-empty">No delivery targets were selected by the backend.</div>
+          }
+        </div>
+      } @else if (trackingState() === 'error') {
+        <div class="empty-state error">
+          <span>!</span><strong>Tracking interrupted</strong>
+          <p>{{ trackingError() }}</p>
+        </div>
+      }
+    </section>
+
+    <section class="records-section">
+      <div class="section-heading compact">
+        <div>
+          <p class="eyebrow">Storage views / 04</p>
+          <h2>Operational records</h2>
+        </div>
+        <button
+          class="secondary-button"
+          type="button"
+          (click)="refreshAll()"
+          [disabled]="!userId() || panelState() === 'loading'"
+        >
+          {{ panelState() === 'loading' ? 'Refreshing…' : 'Refresh all' }}
+        </button>
+      </div>
+      @if (actionMessage()) {
+        <p class="action-message" role="status">{{ actionMessage() }}</p>
+      }
+      @if (panelError()) {
+        <p class="form-error" role="alert">{{ panelError() }}</p>
+      }
+      <div class="record-grid">
+        <article class="record-panel">
+          <header>
+            <div>
+              <span class="record-dot cyan"></span>
+              <h3>Inbox</h3>
+            </div>
+            <strong>{{ inbox().length }}</strong>
+          </header>
+          <div class="record-list">
+            @for (message of inbox(); track trackById($index, message)) {
+              <div class="message-row">
+                <div>
+                  <span class="mini-chip">{{ message.importance }}</span
+                  ><strong>{{ message.title }}</strong>
+                  <p>{{ message.body }}</p>
+                </div>
+                @if (message.status === 'Unread') {
+                  <button type="button" (click)="markRead(message.id)">Mark read</button>
+                } @else {
+                  <small>Read</small>
+                }
+              </div>
+            } @empty {
+              <div class="record-empty">No inbox messages yet.</div>
+            }
+          </div>
+        </article>
+        <article class="record-panel">
+          <header>
+            <div>
+              <span class="record-dot violet"></span>
+              <h3>Archive</h3>
+            </div>
+            <strong>{{ archive().length }}</strong>
+          </header>
+          <div class="record-list">
+            @for (message of archive(); track trackById($index, message)) {
+              <div class="message-row">
+                <div>
+                  <span class="mini-chip">{{ message.importance }}</span
+                  ><strong>{{ message.title }}</strong>
+                  <p>{{ message.createdAt | date: 'mediumTime' }}</p>
+                </div>
+              </div>
+            } @empty {
+              <div class="record-empty">Archive is empty.</div>
+            }
+          </div>
+        </article>
+        <article class="record-panel">
+          <header>
+            <div>
+              <span class="record-dot coral-dot"></span>
+              <h3>Dead letters</h3>
+            </div>
+            <strong>{{ deadLetters().length }}</strong>
+          </header>
+          <div class="record-list">
+            @for (entry of deadLetters(); track entry.delivery.id) {
+              <div class="message-row">
+                <div>
+                  <span class="mini-chip danger">FAILED</span
+                  ><strong>{{ entry.delivery.destination }}</strong>
+                  <p>{{ entry.delivery.lastError || 'Delivery exhausted retries.' }}</p>
+                </div>
+                <button type="button" (click)="retry(entry)">Retry</button>
+              </div>
+            } @empty {
+              <div class="record-empty">No failed deliveries.</div>
+            }
+          </div>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer><span>SIGNAL DESK · LOCAL SESSION</span><span>Angular 22 / ASP.NET Core 9</span></footer>
+</div>
