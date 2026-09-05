@@ -1,0 +1,61 @@
+@baseUrl = http://localhost:5082
+
+GET {{baseUrl}}/health
+Accept: application/json
+
+###
+
+POST {{baseUrl}}/api/users
+Content-Type: application/json
+
+{
+  "name": "Alice",
+  "alertKeywords": ["outage", "security"],
+  "webhookUrl": null
+}
+
+###
+
+POST {{baseUrl}}/api/topics
+Content-Type: application/json
+
+{
+  "name": "Operations"
+}
+
+###
+
+# Substitute IDs returned by the requests above.
+POST {{baseUrl}}/api/topics/TOPIC_ID/subscribers
+Content-Type: application/json
+
+{
+  "userId": "USER_ID",
+  "minimumImportance": "High"
+}
+
+###
+
+POST {{baseUrl}}/api/topics/TOPIC_ID/messages
+Content-Type: application/json
+Idempotency-Key: operation-001
+
+{
+  "title": "Security notice",
+  "body": "Review required",
+  "importance": "Critical"
+}
+
+###
+
+GET {{baseUrl}}/api/deliveries/MESSAGE_ID
+Accept: application/json
+
+###
+
+GET {{baseUrl}}/api/deliveries/dead-letter
+Accept: application/json
+
+###
+
+POST {{baseUrl}}/api/deliveries/DELIVERY_ID/retry
